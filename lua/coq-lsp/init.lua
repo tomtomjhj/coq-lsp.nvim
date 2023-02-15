@@ -53,7 +53,9 @@ end
 local info_panel = {}
 
 local function create_info_panel(bufnr)
-  info_panel[bufnr] = vim.api.nvim_create_buf(false, true)
+  local info_bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_option(info_bufnr, 'filetype', 'coq-goals')
+  info_panel[bufnr] = info_bufnr
 end
 
 local function get_info_panel(bufnr)
@@ -72,6 +74,26 @@ local function open_info_panel(bufnr)
   }
   vim.cmd.clearjumps()
   vim.api.nvim_set_current_win(win)
+end
+
+-- TODO: Render goals nicely.
+-- see also lean.nvim infoview stuff
+---@return string
+local function render_goal(i, n, goal)
+  local lines = {}
+  lines[#lines+1] = 'Goal ' .. i .. ' / ' .. n
+  for _, hyp in ipairs(goal.hyps) do
+    local line = table.concat(hyp.names, ', ') .. ' : ' .. hyp.ty
+    if hyp.def then
+      line = line .. ' := ' .. hyp.def
+    end
+    lines[#lines+1] = line
+  end
+  lines[#lines+1] = ''
+  lines[#lines+1] = '========================================'
+  lines[#lines+1] = ''
+  lines[#lines+1] = goal.ty
+  return table.concat(lines, '\n')
 end
 
 local function show_goals()
@@ -93,23 +115,12 @@ local function show_goals()
   local bufnr = vim.uri_to_bufnr(answer.textDocument.uri)
   local goal_config = answer.goals or {}
   local goals = goal_config.goals or {}
-  -- TODO: Render goals nicely.
-  -- see also lean.nvim infoview stuff
-  local lines = {}
+  local rendered = {}
   for i, goal in ipairs(goals) do
-    lines[#lines+1] = 'Goal ' .. i .. ' / ' .. #goals
-    for _, hyp in ipairs(goal.hyps) do
-      local line = table.concat(hyp.names, ', ') .. ' : ' .. hyp.ty
-      if hyp.def then
-        line = line .. ' := ' .. hyp.def
-      end
-      lines[#lines+1] = line
-    end
-    lines[#lines+1] = '========================='
-    lines[#lines+1] = goal.ty
+    rendered[#rendered+1] = render_goal(i, #goals, goal)
   end
   -- NOTE: each Pp can contain newline, which isn't allowed by nvim_buf_set_lines
-  lines = vim.split(table.concat(lines, '\n'), '\n')
+  local lines = vim.split(table.concat(rendered, '\n\n\n────────────────────────────────────────────────────────────\n'), '\n')
   vim.api.nvim_buf_set_lines(get_info_panel(bufnr), 0, -1, false, lines)
 end
 
