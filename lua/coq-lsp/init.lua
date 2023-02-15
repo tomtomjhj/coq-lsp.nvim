@@ -1,3 +1,6 @@
+---@type table<buffer, { info_bufnr: buffer, cancel_goals: fun() }>
+local buffers = {}
+
 local progress_ns = vim.api.nvim_create_namespace('coq-progress')
 
 local CoqFileProgressKind = {
@@ -42,27 +45,25 @@ local function file_progress_handler(_, result, ctx, _)
   end
 end
 
--- main bufnr ↦ info panel bufnr
-local info_panel = {}
-
 local function create_info_panel(bufnr)
   local info_bufnr = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_option(info_bufnr, 'filetype', 'coq-goals')
-  info_panel[bufnr] = info_bufnr
+  buffers[bufnr].info_bufnr = info_bufnr
 end
 
-local function get_info_panel(bufnr)
-  if info_panel[bufnr] then
-    return info_panel[bufnr]
+local function get_info_bufnr(bufnr)
+  local info_bufnr = buffers[bufnr].info_bufnr
+  if info_bufnr and vim.api.nvim_buf_is_valid(info_bufnr) then
+    return info_bufnr
   end
   create_info_panel(bufnr)
-  return info_panel[bufnr]
+  return buffers[bufnr].info_bufnr
 end
 
 local function open_info_panel(bufnr)
   local win = vim.api.nvim_get_current_win()
   vim.cmd.sbuffer {
-    args = { info_panel[bufnr] },
+    args = { get_info_bufnr(bufnr) },
     mods = { keepjumps = true, keepalt = true, vertical = true, split = 'belowright'},
   }
   vim.cmd.clearjumps()
@@ -89,8 +90,6 @@ local function render_goal(i, n, goal)
   return table.concat(lines, '\n')
 end
 
-local goals_requests = {}
-
 -- answer: GoalAnswer
 local function show_goals(answer)
   local bufnr = vim.uri_to_bufnr(answer.textDocument.uri)
@@ -105,26 +104,26 @@ local function show_goals(answer)
   lines[#lines+1] = vim.fn.bufname(bufnr) .. ':' .. (answer.position.line + 1) .. ':' .. (answer.position.character + 1)
   -- NOTE: each Pp can contain newline, which isn't allowed by nvim_buf_set_lines
   vim.list_extend(lines, vim.split(table.concat(rendered, '\n\n\n────────────────────────────────────────────────────────────\n'), '\n'))
-  vim.api.nvim_buf_set_lines(get_info_panel(bufnr), 0, -1, false, lines)
+  vim.api.nvim_buf_set_lines(get_info_bufnr(bufnr), 0, -1, false, lines)
 end
 
 local function goals_async()
   local bufnr = vim.api.nvim_get_current_buf()
-  local cancel_old = goals_requests[bufnr]
+  local cancel_old = buffers[bufnr].cancel_goals
   if cancel_old then
-    goals_requests[bufnr] = nil
+    buffers[bufnr].cancel_goals = nil
     cancel_old()
   end
   local params = vim.lsp.util.make_position_params()
   local cancel = vim.lsp.buf_request_all(bufnr, 'proof/goals', params, function(results)
     -- results: client_id ↦ { result: GoalAnswer, error: { code, message, data? } }
-    goals_requests[bufnr] = nil
+    buffers[bufnr].cancel_goals = nil
     for _, request_result in pairs(results) do
       if request_result.err then return end
       show_goals(request_result.result)
     end
   end)
-  goals_requests[bufnr] = cancel
+  buffers[bufnr].cancel_goals = cancel
 end
 
 local function goals_sync()
@@ -134,6 +133,7 @@ local function goals_sync()
     print('goals_sync() failed: ' .. err)
     return
   end
+  assert(results ~= nil)
   for _, request_result in pairs(results) do
     if request_result.err then return end
     show_goals(request_result.result)
@@ -142,7 +142,17 @@ end
 
 local ag = vim.api.nvim_create_augroup("coq-lsp", { clear = true })
 
-local function on_attach(client, bufnr)
+local function unregister(bufnr)
+  vim.api.nvim_buf_clear_namespace(bufnr, progress_ns, 0, -1)
+  if buffers[bufnr].info_bufnr then
+    vim.api.nvim_buf_delete(buffers[bufnr].info_bufnr, { force = true })
+  end
+  buffers[bufnr] = nil
+end
+
+local function register(bufnr)
+  assert(buffers[bufnr] == nil)
+  buffers[bufnr] = {}
   create_info_panel(bufnr)
   open_info_panel(bufnr)
   vim.api.nvim_create_autocmd({"CursorMoved", "CursorMovedI"}, {
@@ -151,7 +161,25 @@ local function on_attach(client, bufnr)
     desc = "Request proof/goals on cursor movement",
     callback = goals_async,
   })
+  vim.api.nvim_create_autocmd({"BufDelete"}, {
+    group = ag,
+    buffer = bufnr,
+    desc = "Unregister deleted buffer",
+    callback = function()
+      unregister(bufnr)
+    end,
+  })
   goals_async()
+end
+
+local function stop()
+  for _, client in ipairs(vim.lsp.get_active_clients{ name = 'coq_lsp' }) do
+    client.stop(true)
+  end
+  for bufnr, _ in pairs(buffers) do
+    unregister(bufnr)
+  end
+  vim.api.nvim_clear_autocmds{ group = ag }
 end
 
 local function setup(opts)
@@ -161,7 +189,7 @@ local function setup(opts)
   })
   local user_on_attach = opts.on_attach
   opts.on_attach = function(client, bufnr)
-    on_attach(client, bufnr)
+    register(bufnr)
     if user_on_attach then
       user_on_attach(client, bufnr)
     end
@@ -169,9 +197,15 @@ local function setup(opts)
   require('lspconfig').coq_lsp.setup(opts)
 end
 
+local function status()
+  vim.pretty_print(buffers)
+end
+
 return {
   setup = setup,
   goals_sync = goals_sync,
   goals_async = goals_async,
   panels = function() open_info_panel(vim.api.nvim_get_current_buf()) end,
+  stop = stop,
+  status = status,
 }
