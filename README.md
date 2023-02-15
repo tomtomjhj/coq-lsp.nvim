@@ -1,4 +1,11 @@
-# setup
+# coq-lsp.nvim
+A simple Neovim client for [`coq-lsp`](https://github.com/ejgallego/coq-lsp/).
+
+## Prerequisites
+* [Latest stable version of Neovim](https://github.com/neovim/neovim/releases/tag/stable)
+* [`coq-lsp`](https://github.com/ejgallego/coq-lsp/#%EF%B8%8F-installation)
+
+## Setup
 ```vim
 Plug 'neovim/nvim-lspconfig'
 Plug 'whonore/Coqtail' " for ftdetect, syntax, basic ftplugin, etc
@@ -14,7 +21,12 @@ let g:coqtail#supported = 0
 lua require'coq-lsp'.setup()
 ```
 
-# interface
+## Interface
+coq-lsp.nvim uses Neovim's built-in LSP client.
+See [kickstart.nvim](https://github.com/nvim-lua/kickstart.nvim/) or
+[lsp-zero.nvim](https://github.com/VonHeikemen/lsp-zero.nvim)
+for example configurations.
+
 ATM, this plugin does not create any Ex-commands or mappings.
 
 On cursor movement, it asynchronously displays the goals for the position of cursor on the auxiliary panel.
@@ -22,4 +34,9 @@ On cursor movement, it asynchronously displays the goals for the position of cur
 Open auxiliary panels for the current buffer:
 ```vim
 :lua require'coq-lsp'.panels()
+```
+
+Stop `coq-lsp`:
+```vim
+:lua require'coq-lsp'.stop()
 ```
