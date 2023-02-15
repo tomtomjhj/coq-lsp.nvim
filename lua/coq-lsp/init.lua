@@ -96,22 +96,9 @@ local function render_goal(i, n, goal)
   return table.concat(lines, '\n')
 end
 
-local function show_goals()
-  local params = vim.lsp.util.make_position_params()
-  -- TODO: async vs. sync? When do we want to send this request?
-  -- vscode client seems to send it on cursor movement.
-  -- In that case, should be async because otherwise user will experience lag.
-  -- Problems with async
-  -- * How to handle multiple in-flight requests?
-  -- * How does the user know that the currently shown goal is the goal at the cursor?
-  --   Show spinner?
-  local results, err = vim.lsp.buf_request_sync(0, 'proof/goals', params, 500)
-  if err then
-    print('goals() failed: ' .. err)
-    return
-  end
+local goals_requests = {}
 
-  local answer = results[1].result
+local function show_goals(answer)
   local bufnr = vim.uri_to_bufnr(answer.textDocument.uri)
   local goal_config = answer.goals or {}
   local goals = goal_config.goals or {}
@@ -119,9 +106,48 @@ local function show_goals()
   for i, goal in ipairs(goals) do
     rendered[#rendered+1] = render_goal(i, #goals, goal)
   end
+  local lines = {}
+  -- TODO: convert to byte index?
+  lines[#lines+1] = vim.fn.bufname(bufnr) .. ':' .. (answer.position.line + 1) .. ':' .. (answer.position.character + 1)
   -- NOTE: each Pp can contain newline, which isn't allowed by nvim_buf_set_lines
-  local lines = vim.split(table.concat(rendered, '\n\n\n────────────────────────────────────────────────────────────\n'), '\n')
+  vim.list_extend(lines, vim.split(table.concat(rendered, '\n\n\n────────────────────────────────────────────────────────────\n'), '\n'))
   vim.api.nvim_buf_set_lines(get_info_panel(bufnr), 0, -1, false, lines)
+end
+
+local function goals_async()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cancel_old = goals_requests[bufnr]
+  if cancel_old then
+    goals_requests[bufnr] = nil
+    cancel_old()
+  end
+  local params = vim.lsp.util.make_position_params()
+  local cancel = vim.lsp.buf_request_all(bufnr, 'proof/goals', params, function(results) show_goals(results[1].result) end)
+  goals_requests[bufnr] = cancel
+end
+
+local function goals_sync()
+  local params = vim.lsp.util.make_position_params()
+  local results, err = vim.lsp.buf_request_sync(0, 'proof/goals', params, 500)
+  if err then
+    print('goals_sync() failed: ' .. err)
+    return
+  end
+  show_goals(results[1].result)
+end
+
+local ag = vim.api.nvim_create_augroup("coq-lsp", { clear = true })
+
+local function on_attach(client, bufnr)
+  create_info_panel(bufnr)
+  open_info_panel(bufnr)
+  vim.api.nvim_create_autocmd({"CursorMoved", "CursorMovedI"}, {
+    group = ag,
+    buffer = bufnr,
+    desc = "Request proof/goals on cursor movement",
+    callback = goals_async,
+  })
+  goals_async()
 end
 
 local function setup(opts)
@@ -131,8 +157,7 @@ local function setup(opts)
   })
   local user_on_attach = opts.on_attach
   opts.on_attach = function(client, bufnr)
-    create_info_panel(bufnr)
-    open_info_panel(bufnr)
+    on_attach(client, bufnr)
     if user_on_attach then
       user_on_attach(client, bufnr)
     end
@@ -142,6 +167,7 @@ end
 
 return {
   setup = setup,
-  goals = show_goals,
+  goals_sync = goals_sync,
+  goals_async = goals_async,
   panels = function() open_info_panel(vim.api.nvim_get_current_buf()) end,
 }
