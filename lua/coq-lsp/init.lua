@@ -143,4 +143,5 @@ end
 return {
   setup = setup,
   goals = show_goals,
+  panels = function() open_info_panel(vim.api.nvim_get_current_buf()) end,
 }
