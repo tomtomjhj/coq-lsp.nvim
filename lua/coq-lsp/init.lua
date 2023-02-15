@@ -122,7 +122,10 @@ local function goals_async()
     cancel_old()
   end
   local params = vim.lsp.util.make_position_params()
-  local cancel = vim.lsp.buf_request_all(bufnr, 'proof/goals', params, function(results) show_goals(results[1].result) end)
+  local cancel = vim.lsp.buf_request_all(bufnr, 'proof/goals', params, function(results)
+    goals_requests[bufnr] = nil
+    show_goals(results[1].result)
+  end)
   goals_requests[bufnr] = cancel
 end
 
