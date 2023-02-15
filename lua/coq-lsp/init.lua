@@ -1,10 +1,3 @@
--- https://github.com/whonore/Coqtail/issues/7
--- https://github.com/ProofGeneral/PG/issues/619#issuecomment-1422540642
--- NOTE: coq-lsp sometimes DOSes client. Crashes vscode and breaks nvim rpc stuff.
-
-local lspconfig = require('lspconfig')
-local util = require('vim.lsp.util')
-
 local progress_ns = vim.api.nvim_create_namespace('coq-progress')
 
 local CoqFileProgressKind = {
@@ -23,12 +16,12 @@ local function file_progress_handler(_, result, ctx, _)
     -- taken from vim.lsp.util.buf_highlight_references()
     local start_line, start_char = info.range['start']['line'], info.range['start']['character']
     local end_line, end_char = info.range['end']['line'], info.range['end']['character']
-    local start_idx = util._get_line_byte_from_position(
+    local start_idx = vim.lsp.util._get_line_byte_from_position(
       bufnr,
       { line = start_line, character = start_char },
       offset_encoding
     )
-    local end_idx = util._get_line_byte_from_position(
+    local end_idx = vim.lsp.util._get_line_byte_from_position(
       bufnr,
       { line = start_line, character = end_char },
       offset_encoding
@@ -165,7 +158,7 @@ local function setup(opts)
       user_on_attach(client, bufnr)
     end
   end
-  lspconfig.coq_lsp.setup(opts)
+  require('lspconfig').coq_lsp.setup(opts)
 end
 
 return {
