@@ -91,6 +91,7 @@ end
 
 local goals_requests = {}
 
+-- answer: GoalAnswer
 local function show_goals(answer)
   local bufnr = vim.uri_to_bufnr(answer.textDocument.uri)
   local goal_config = answer.goals or {}
@@ -116,8 +117,12 @@ local function goals_async()
   end
   local params = vim.lsp.util.make_position_params()
   local cancel = vim.lsp.buf_request_all(bufnr, 'proof/goals', params, function(results)
+    -- results: client_id ↦ { result: GoalAnswer, error: { code, message, data? } }
     goals_requests[bufnr] = nil
-    show_goals(results[1].result)
+    for _, request_result in pairs(results) do
+      if request_result.err then return end
+      show_goals(request_result.result)
+    end
   end)
   goals_requests[bufnr] = cancel
 end
@@ -129,7 +134,10 @@ local function goals_sync()
     print('goals_sync() failed: ' .. err)
     return
   end
-  show_goals(results[1].result)
+  for _, request_result in pairs(results) do
+    if request_result.err then return end
+    show_goals(request_result.result)
+  end
 end
 
 local ag = vim.api.nvim_create_augroup("coq-lsp", { clear = true })
