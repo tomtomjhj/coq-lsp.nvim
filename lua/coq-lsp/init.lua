@@ -119,7 +119,7 @@ local function goals_async()
     -- results: client_id ↦ { result: GoalAnswer, error: { code, message, data? } }
     buffers[bufnr].cancel_goals = nil
     for _, request_result in pairs(results) do
-      if request_result.err then return end
+      if request_result.error then return end
       show_goals(request_result.result)
     end
   end)
