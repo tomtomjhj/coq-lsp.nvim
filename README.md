@@ -40,3 +40,24 @@ Stop `coq-lsp`:
 ```vim
 :lua require'coq-lsp'.stop()
 ```
+
+## Configurations
+
+Example:
+```lua
+require'coq-lsp'.setup {
+  -- configuration for coq-lsp.nvim
+  coq_lsp_nvim = {
+    -- to be added
+  },
+  -- configuration forwarded `:help lspconfig-setup`
+  lsp = {
+    on_attach = function(client, bufnr)
+      -- your mappings, etc
+    end,
+    init_options = {
+      show_notices_as_diagnostics = true,
+    },
+  },
+)
+```
