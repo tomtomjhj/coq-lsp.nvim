@@ -182,19 +182,21 @@ local function stop()
   vim.api.nvim_clear_autocmds{ group = ag }
 end
 
+---@param opts { coq_lsp_nvim: table<string,any>, lsp: table<string,any> }
 local function setup(opts)
   opts = opts or {}
-  opts.handlers = vim.tbl_extend('keep', opts.handlers or {}, {
+  opts.lsp = opts.lsp or {}
+  opts.lsp.handlers = vim.tbl_extend('keep', opts.lsp.handlers or {}, {
     ['$/coq/fileProgress'] = file_progress_handler,
   })
-  local user_on_attach = opts.on_attach
-  opts.on_attach = function(client, bufnr)
+  local user_on_attach = opts.lsp.on_attach
+  opts.lsp.on_attach = function(client, bufnr)
     register(bufnr)
     if user_on_attach then
       user_on_attach(client, bufnr)
     end
   end
-  require('lspconfig').coq_lsp.setup(opts)
+  require('lspconfig').coq_lsp.setup(opts.lsp)
 end
 
 local function status()
