@@ -330,7 +330,9 @@ local function setup(opts)
     elseif the_client ~= client then
       error('coq-lsp client must be unique')
     end
-    register(bufnr)
+    if not buffers[bufnr] then
+      register(bufnr)
+    end
     if user_on_attach then
       user_on_attach(client, bufnr)
     end
