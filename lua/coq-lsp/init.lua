@@ -272,6 +272,7 @@ local ag = vim.api.nvim_create_augroup("coq-lsp", { clear = true })
 
 ---@param bufnr buffer
 local function unregister(bufnr)
+  vim.api.nvim_clear_autocmds { group = ag, buffer = bufnr }
   vim.api.nvim_buf_clear_namespace(bufnr, progress_ns, 0, -1)
   if buffers[bufnr].info_bufnr then
     vim.api.nvim_buf_delete(buffers[bufnr].info_bufnr, { force = true })
@@ -295,10 +296,10 @@ local function register(bufnr)
   })
   -- nvim bug? If the current coq buf is the only valid buffer and I bwipeout
   -- that buffer, this buffer is newly added to buffer list.
-  vim.api.nvim_create_autocmd({"BufDelete"}, {
+  vim.api.nvim_create_autocmd({"BufDelete", "LspDetach"}, {
     group = ag,
     buffer = bufnr,
-    desc = "Unregister deleted buffer",
+    desc = "Unregister deleted/detached buffer",
     callback = function(ev) unregister(ev.buf) end,
   })
   goals_async(bufnr)
