@@ -325,10 +325,10 @@ local function setup(opts)
   })
   local user_on_attach = opts.lsp.on_attach
   opts.lsp.on_attach = function(client, bufnr)
-    if the_client then
-      error('coq-lsp client must be unique')
-    else
+    if not the_client then
       the_client = client
+    elseif the_client ~= client then
+      error('coq-lsp client must be unique')
     end
     register(bufnr)
     if user_on_attach then
