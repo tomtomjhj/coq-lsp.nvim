@@ -40,6 +40,7 @@ Stop `coq-lsp`:
 ```vim
 :lua require'coq-lsp'.stop()
 ```
+Do not use lspconfig's `:LspStop` and `:LspRestart`.
 
 ## Configurations
 
