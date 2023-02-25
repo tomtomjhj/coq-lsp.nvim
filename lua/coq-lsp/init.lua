@@ -24,7 +24,7 @@
 -- vim.lsp.client
 ---@class Client
 ---@field offset_encoding OffsetEncoding
----@field stop fun(bool?)
+---@field stop fun(stop?: boolean)
 
 -- }}}
 
@@ -316,16 +316,10 @@ local function stop()
   vim.api.nvim_clear_autocmds{ group = ag }
 end
 
----@param opts { coq_lsp_nvim?: table<string,any>, lsp?: table<string,any> }
-local function setup(opts)
-  opts = opts or {}
-  opts.lsp = opts.lsp or {}
-  opts.lsp.handlers = vim.tbl_extend('keep', opts.lsp.handlers or {}, {
-    -- TODO: throttle fileProgress handling.. or maybe let the server do that
-    ['$/coq/fileProgress'] = file_progress_handler,
-  })
-  local user_on_attach = opts.lsp.on_attach
-  opts.lsp.on_attach = function(client, bufnr)
+---@param user_on_attach? fun(client: Client, bufnr: buffer)
+---@return fun(client: Client, bufnr: buffer)
+local function on_attach(user_on_attach)
+  return function(client, bufnr)
     if not the_client then
       the_client = client
     elseif the_client ~= client then
@@ -338,6 +332,18 @@ local function setup(opts)
       user_on_attach(client, bufnr)
     end
   end
+end
+
+---@param opts { coq_lsp_nvim?: table<string,any>, lsp?: table<string,any> }
+local function setup(opts)
+  opts = opts or {}
+  opts.lsp = opts.lsp or {}
+  opts.lsp.handlers = vim.tbl_extend('keep', opts.lsp.handlers or {}, {
+    -- TODO: throttle fileProgress handling.. or maybe let the server do that
+    ['$/coq/fileProgress'] = file_progress_handler,
+  })
+  local user_on_attach = opts.lsp.on_attach
+  opts.lsp.on_attach = on_attach(user_on_attach)
   require('lspconfig').coq_lsp.setup(opts.lsp)
 end
 
