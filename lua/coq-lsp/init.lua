@@ -110,7 +110,7 @@ end
 ---@type Client?
 local the_client
 
----@type table<buffer, { info_bufnr: buffer, cancel_goals: fun() }>
+---@type table<buffer, { info_bufnr: buffer, cancel_goals?: fun(), debounce_timer: uv.uv_timer_t }>
 local buffers = {}
 
 ---@class CoqLSPNvimConfig
@@ -118,6 +118,7 @@ local buffers = {}
 local config = {
   -- TODO: implement it; should be dynamically configurable
   show_goals_on = "cursor",
+  goals_debounce = 150,
 }
 
 local progress_ns = vim.api.nvim_create_namespace('coq-progress')
@@ -246,6 +247,22 @@ local function goals_async(bufnr, position)
   buffers[bufnr].cancel_goals = cancel
 end
 
+---@param bufnr buffer
+---@param position? MarkPosition
+local function goals_async_debounced(bufnr, position)
+  -- Must get the position before scheduling, because at the time of execution,
+  -- the current window may have changed.
+  position = position or guess_position(bufnr)
+  local timer = buffers[bufnr].debounce_timer
+  -- NOTE: Stopping the timer doesn't touch already scheduled callbacks.
+  timer:stop()
+  timer:start(
+    config.goals_debounce,
+    0,
+    vim.schedule_wrap(function() goals_async(bufnr, position) end)
+  )
+end
+
 ---@param bufnr? buffer
 ---@param position? MarkPosition
 local function goals_sync(bufnr, position)
@@ -272,8 +289,11 @@ local ag = vim.api.nvim_create_augroup("coq-lsp", { clear = true })
 
 ---@param bufnr buffer
 local function unregister(bufnr)
-  vim.api.nvim_clear_autocmds { group = ag, buffer = bufnr }
+  assert(buffers[bufnr])
   vim.api.nvim_buf_clear_namespace(bufnr, progress_ns, 0, -1)
+  vim.api.nvim_clear_autocmds { group = ag, buffer = bufnr }
+  buffers[bufnr].debounce_timer:stop()
+  buffers[bufnr].debounce_timer:close()
   if buffers[bufnr].info_bufnr then
     vim.api.nvim_buf_delete(buffers[bufnr].info_bufnr, { force = true })
   end
@@ -286,13 +306,12 @@ local function register(bufnr)
   buffers[bufnr] = {}
   create_info_panel(bufnr)
   open_info_panel(bufnr)
-  -- TODO: Debounce goals request on cursor movement.
-  -- Don't use CursorHold, because updatetime default is too long.
+  buffers[bufnr].debounce_timer = assert(vim.loop.new_timer(), 'Could not create timer')
   vim.api.nvim_create_autocmd({"CursorMoved", "CursorMovedI"}, {
     group = ag,
     buffer = bufnr,
     desc = "Request proof/goals on cursor movement",
-    callback = function(ev) goals_async(ev.buf) end,
+    callback = function(ev) goals_async_debounced(ev.buf) end,
   })
   -- nvim bug? If the current coq buf is the only valid buffer and I bwipeout
   -- that buffer, this buffer is newly added to buffer list.
