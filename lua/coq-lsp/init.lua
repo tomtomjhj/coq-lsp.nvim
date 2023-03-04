@@ -168,8 +168,9 @@ local function get_info_bufnr(bufnr)
   return buffers[bufnr].info_bufnr
 end
 
----@param bufnr buffer
+---@param bufnr? buffer
 local function open_info_panel(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
   vim.cmd.sbuffer {
     args = { get_info_bufnr(bufnr) },
@@ -278,7 +279,7 @@ local function goals_sync(bufnr, position)
     print('goals_sync() failed: ' .. err)
     return
   end
-  assert(results ~= nil)
+  assert(results)
   for _, request_result in pairs(results) do
     if request_result.err then return end
     show_goals(request_result.result, position)
@@ -373,10 +374,10 @@ local function status()
 end
 
 return {
-  setup = setup,
-  goals_sync = goals_sync,
   goals_async = goals_async,
-  panels = function() open_info_panel(vim.api.nvim_get_current_buf()) end,
-  stop = stop,
+  goals_sync = goals_sync,
+  panels = open_info_panel,
+  setup = setup,
   status = status,
+  stop = stop,
 }
