@@ -286,6 +286,49 @@ local function goals_sync(bufnr, position)
   end
 end
 
+
+---@param bufnr? buffer
+local function get_document(bufnr)
+  assert(the_client)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local params = {
+    textDocument = vim.lsp.util.make_text_document_params(bufnr),
+  }
+  local results, err = vim.lsp.buf_request_sync(bufnr, 'coq/getDocument', params, 500)
+  if err then
+    print('get_document() failed: ' .. err)
+    return
+  end
+  assert(results)
+  for _, request_result in pairs(results) do
+    if request_result.err then return end
+    return request_result.result
+  end
+end
+
+
+---@param bufnr? buffer
+local function save_vo(bufnr)
+  assert(the_client)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local params = {
+    textDocument = vim.lsp.util.make_text_document_params(bufnr),
+  }
+  local results, err = vim.lsp.buf_request_sync(bufnr, 'coq/saveVo', params, 500)
+  if err then
+    print('save_vo() failed: ' .. err)
+    return
+  end
+  assert(results)
+  for _, request_result in pairs(results) do
+    if request_result.err then
+      print('save_vo() failed:')
+      vim.pretty_print(request_result.err)
+    end
+  end
+end
+
+
 local ag = vim.api.nvim_create_augroup("coq-lsp", { clear = true })
 
 ---@param bufnr buffer
@@ -374,9 +417,11 @@ local function status()
 end
 
 return {
+  get_document = get_document,
   goals_async = goals_async,
   goals_sync = goals_sync,
   panels = open_info_panel,
+  save_vo = save_vo,
   setup = setup,
   status = status,
   stop = stop,
