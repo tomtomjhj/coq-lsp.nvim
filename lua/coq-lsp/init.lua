@@ -1,3 +1,6 @@
+-- Suppress warnings about private methods of lsp.Client. <https://github.com/neovim/neovim/pull/22509>
+---@diagnostic disable: invisible
+
 -- nvim types {{{
 
 --- Position for indexing used by most API functions (0-based line, 0-based column) (:h api-indexing).
@@ -20,11 +23,6 @@
 
 -- Corresponds to LSP's PositionEncodingKind
 ---@alias OffsetEncoding "utf-8"|"utf-16"|"utf-32"
-
--- vim.lsp.client
----@class Client
----@field offset_encoding OffsetEncoding
----@field stop fun(stop?: boolean)
 
 -- }}}
 
@@ -104,13 +102,28 @@ local function guess_position(bufnr)
   return vim.api.nvim_win_get_cursor(win)
 end
 
+---@param client lsp.Client
+---@param bufnr integer
+---@param method string
+---@param params table
+---@param handler? lsp-handler
+---@return fun()|nil cancel function to cancel the request
+local function request_async(client, bufnr, method, params, handler)
+  local request_success, request_id = client.request(method, params, handler, bufnr)
+  if request_success then
+    return function()
+      client.cancel_request(assert(request_id))
+    end
+  end
+end
+
 -- }}}
 
 -- Assume that coq-lsp LSP client is unique.
----@type Client?
+---@type lsp.Client?
 local the_client
 
----@type table<buffer, { info_bufnr: buffer, cancel_goals?: fun(), debounce_timer: uv.uv_timer_t }>
+---@type table<buffer, { info_bufnr: buffer, cancel_goals?: fun(), debounce_timer: uv_timer_t }>
 local buffers = {}
 
 ---@class CoqLSPNvimConfig
@@ -133,6 +146,7 @@ local progress_highlight_kind = {
   [CoqFileProgressKind.FatalError] = 'Error',
 }
 
+---@type lsp-handler
 local function file_progress_handler(_, result, _, _)
   assert(the_client)
   local bufnr = vim.uri_to_bufnr(result.textDocument.uri)
@@ -237,13 +251,10 @@ local function goals_async(bufnr, position)
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
     position = make_position_params(bufnr, position, the_client.offset_encoding)
   }
-  local cancel = vim.lsp.buf_request_all(bufnr, 'proof/goals', params, function(results)
-    -- results: client_id ↦ { result: GoalAnswer, error: { code, message, data? } }
+  local cancel = request_async(the_client, bufnr, 'proof/goals', params, function(err, result)
     buffers[bufnr].cancel_goals = nil
-    for _, request_result in pairs(results) do
-      if request_result.error then return end
-      show_goals(request_result.result, position)
-    end
+    if err then return end
+    show_goals(result, position)
   end)
   buffers[bufnr].cancel_goals = cancel
 end
@@ -274,16 +285,14 @@ local function goals_sync(bufnr, position)
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
     position = make_position_params(bufnr, position, the_client.offset_encoding)
   }
-  local results, err = vim.lsp.buf_request_sync(bufnr, 'proof/goals', params, 500)
+  local request_result, err = the_client.request_sync('proof/goals', params, 500, bufnr)
   if err then
-    print('goals_sync() failed: ' .. err)
+    vim.notify('goals_sync() failed: ' .. err, vim.log.levels.ERROR)
     return
   end
-  assert(results)
-  for _, request_result in pairs(results) do
-    if request_result.err then return end
-    show_goals(request_result.result, position)
-  end
+  assert(request_result)
+  if request_result.err then return end
+  show_goals(request_result.result, position)
 end
 
 
@@ -294,16 +303,14 @@ local function get_document(bufnr)
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
-  local results, err = vim.lsp.buf_request_sync(bufnr, 'coq/getDocument', params, 500)
+  local request_result, err = the_client.request_sync('coq/getDocument', params, 500, bufnr)
   if err then
-    print('get_document() failed: ' .. err)
+    vim.notify('get_document() failed: ' .. err, vim.log.levels.ERROR)
     return
   end
-  assert(results)
-  for _, request_result in pairs(results) do
-    if request_result.err then return end
-    return request_result.result
-  end
+  assert(request_result)
+  if request_result.err then return end
+  return request_result.result
 end
 
 
@@ -314,17 +321,15 @@ local function save_vo(bufnr)
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
-  local results, err = vim.lsp.buf_request_sync(bufnr, 'coq/saveVo', params, 500)
+  local request_result, err = the_client.request_sync('coq/saveVo', params, 500, bufnr)
   if err then
-    print('save_vo() failed: ' .. err)
+    vim.notify('save_vo() failed: ' .. err, vim.log.levels.ERROR)
     return
   end
-  assert(results)
-  for _, request_result in pairs(results) do
-    if request_result.err then
-      print('save_vo() failed:')
-      vim.pretty_print(request_result.err)
-    end
+  assert(request_result)
+  if request_result.err then
+    vim.notify('save_vo() failed:', vim.log.levels.ERROR)
+    vim.pretty_print(request_result.err)
   end
 end
 
@@ -379,9 +384,9 @@ local function stop()
   vim.api.nvim_clear_autocmds{ group = ag }
 end
 
----@param user_on_attach? fun(client: Client, bufnr: buffer)
----@return fun(client: Client, bufnr: buffer)
-local function on_attach(user_on_attach)
+---@param user_on_attach? fun(client: lsp.Client, bufnr: buffer)
+---@return fun(client: lsp.Client, bufnr: buffer)
+local function make_on_attach(user_on_attach)
   return function(client, bufnr)
     if not the_client then
       the_client = client
@@ -406,7 +411,7 @@ local function setup(opts)
     ['$/coq/fileProgress'] = file_progress_handler,
   })
   local user_on_attach = opts.lsp.on_attach
-  opts.lsp.on_attach = on_attach(user_on_attach)
+  opts.lsp.on_attach = make_on_attach(user_on_attach)
   require('lspconfig').coq_lsp.setup(opts.lsp)
 end
 
