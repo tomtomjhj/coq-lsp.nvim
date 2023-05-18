@@ -122,8 +122,10 @@ end
 -- Assume that coq-lsp LSP client is unique.
 ---@type lsp.Client?
 local the_client
+---@type uv_timer_t?
+local debounce_timer
 
----@type table<buffer, { info_bufnr: buffer, cancel_goals?: fun(), debounce_timer: uv_timer_t }>
+---@type table<buffer, { info_bufnr: buffer, cancel_goals?: fun() }>
 local buffers = {}
 
 ---@class CoqLSPNvimConfig
@@ -236,7 +238,7 @@ local function show_goals(answer, position)
   vim.api.nvim_buf_set_lines(get_info_bufnr(bufnr), 0, -1, false, lines)
 end
 
----@param bufnr? buffer
+---@param bufnr? buffer registered buffer
 ---@param position? MarkPosition
 local function goals_async(bufnr, position)
   assert(the_client)
@@ -259,23 +261,23 @@ local function goals_async(bufnr, position)
   buffers[bufnr].cancel_goals = cancel
 end
 
----@param bufnr buffer
----@param position? MarkPosition
-local function goals_async_debounced(bufnr, position)
-  -- Must get the position before scheduling, because at the time of execution,
-  -- the current window may have changed.
-  position = position or guess_position(bufnr)
-  local timer = buffers[bufnr].debounce_timer
+local function goals_async_debounced()
+  assert(debounce_timer)
   -- NOTE: Stopping the timer doesn't touch already scheduled callbacks.
-  timer:stop()
-  timer:start(
+  debounce_timer:stop()
+  debounce_timer:start(
     config.goals_debounce,
     0,
-    vim.schedule_wrap(function() goals_async(bufnr, position) end)
+    vim.schedule_wrap(function()
+      local bufnr = vim.api.nvim_get_current_buf()
+      if buffers[bufnr] then
+        goals_async(bufnr)
+      end
+    end)
   )
 end
 
----@param bufnr? buffer
+---@param bufnr? buffer registered buffer
 ---@param position? MarkPosition
 local function goals_sync(bufnr, position)
   assert(the_client)
@@ -341,8 +343,6 @@ local function unregister(bufnr)
   assert(buffers[bufnr])
   vim.api.nvim_buf_clear_namespace(bufnr, progress_ns, 0, -1)
   vim.api.nvim_clear_autocmds { group = ag, buffer = bufnr }
-  buffers[bufnr].debounce_timer:stop()
-  buffers[bufnr].debounce_timer:close()
   if buffers[bufnr].info_bufnr then
     vim.api.nvim_buf_delete(buffers[bufnr].info_bufnr, { force = true })
   end
@@ -355,12 +355,11 @@ local function register(bufnr)
   buffers[bufnr] = {}
   create_info_panel(bufnr)
   open_info_panel(bufnr)
-  buffers[bufnr].debounce_timer = assert(vim.loop.new_timer(), 'Could not create timer')
   vim.api.nvim_create_autocmd({"CursorMoved", "CursorMovedI"}, {
     group = ag,
     buffer = bufnr,
     desc = "Request proof/goals on cursor movement",
-    callback = function(ev) goals_async_debounced(ev.buf) end,
+    callback = goals_async_debounced,
   })
   -- nvim bug? If the current coq buf is the only valid buffer and I bwipeout
   -- that buffer, this buffer is newly added to buffer list.
@@ -375,9 +374,12 @@ end
 
 local function stop()
   assert(the_client)
+  assert(debounce_timer)
   -- TODO: maybe no need to force after https://github.com/ejgallego/coq-lsp/pull/375
   the_client.stop(true)
   the_client = nil
+  debounce_timer:stop()
+  debounce_timer:close()
   for bufnr, _ in pairs(buffers) do
     unregister(bufnr)
   end
@@ -390,6 +392,7 @@ local function make_on_attach(user_on_attach)
   return function(client, bufnr)
     if not the_client then
       the_client = client
+      debounce_timer = assert(vim.loop.new_timer(), 'Could not create timer')
     elseif the_client ~= client then
       error('coq-lsp client must be unique')
     end
@@ -416,9 +419,9 @@ local function setup(opts)
 end
 
 local function status()
-  vim.pretty_print('client', the_client)
-  vim.pretty_print('config', config)
-  vim.pretty_print('buffers', buffers)
+  vim.print('client', the_client)
+  vim.print('config', config)
+  vim.print('buffers', buffers)
 end
 
 return {
