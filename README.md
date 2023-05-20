@@ -22,25 +22,18 @@ lua require'coq-lsp'.setup()
 ```
 
 ## Interface
-coq-lsp.nvim uses Neovim's built-in LSP client.
-See [kickstart.nvim](https://github.com/nvim-lua/kickstart.nvim/) or
-[lsp-zero.nvim](https://github.com/VonHeikemen/lsp-zero.nvim)
-for example configurations.
-
-ATM, this plugin does not create any Ex-commands or mappings.
-
-On cursor movement, it asynchronously displays the goals for the position of cursor on the auxiliary panel.
-
-Open auxiliary panels for the current buffer:
-```vim
-:lua require'coq-lsp'.panels()
-```
-
-Stop `coq-lsp`:
-```vim
-:lua require'coq-lsp'.stop()
-```
-Do not use lspconfig's `:LspStop` and `:LspRestart`.
+* coq-lsp.nvim uses Neovim's built-in LSP client and nvim-lspconfig.
+  See [kickstart.nvim](https://github.com/nvim-lua/kickstart.nvim/)
+  for basic example configurations for working with LSP.
+* ATM, this plugin does not create any Ex-commands or mappings.
+* [Commands from nvim-lspconfig](https://github.com/neovim/nvim-lspconfig#commands)
+  work as expected.
+  For example, run `:LspRestart` to restart coq-lsp.
+* On cursor movement, it asynchronously displays the goals for the position of cursor on the auxiliary panel.
+* Open auxiliary panel for the current buffer:
+  ```vim
+  :lua require'coq-lsp'.panels()
+  ```
 
 ## Configurations
 
