@@ -120,23 +120,41 @@ end
 -- }}}
 
 -- Assume that coq-lsp LSP client is unique.
----@type lsp.Client?
+---@type CoqLSPNvim?
 local the_client
----@type uv_timer_t?
-local debounce_timer
-
----@type table<buffer, { info_bufnr: buffer, cancel_goals?: fun() }>
-local buffers = {}
 
 ---@class CoqLSPNvimConfig
+---@field goals_debounce integer
 ---@field show_goals_on "manual"|"cursor"
-local config = {
+
+---@type CoqLSPNvimConfig
+local default_config = {
   -- TODO: implement it; should be dynamically configurable
   show_goals_on = "cursor",
   goals_debounce = 150,
 }
 
-local progress_ns = vim.api.nvim_create_namespace('coq-progress')
+---@class CoqLSPNvim
+---@field lc lsp.Client
+---@field buffers table<buffer, { info_bufnr: buffer, cancel_goals?: fun() }>
+---@field debounce_timer uv_timer_t
+---@field config CoqLSPNvimConfig
+---@field progress_ns integer
+---@field ag integer
+local CoqLSPNvim = {}
+CoqLSPNvim.__index = CoqLSPNvim
+
+---@param client lsp.Client
+function CoqLSPNvim:new(client)
+  local new = {}
+  new.lc = client
+  new.buffers = {}
+  new.debounce_timer = assert(vim.loop.new_timer(), 'Could not create timer')
+  new.config = default_config
+  new.progress_ns = vim.api.nvim_create_namespace('coq-lsp-progress-' .. client.id)
+  new.ag = vim.api.nvim_create_augroup("coq-lsp-" .. client.id, { clear = true })
+  return setmetatable(new, self)
+end
 
 local CoqFileProgressKind = {
   Processing = 1,
@@ -152,44 +170,44 @@ local progress_highlight_kind = {
 local function file_progress_handler(_, result, _, _)
   assert(the_client)
   local bufnr = vim.uri_to_bufnr(result.textDocument.uri)
-  vim.api.nvim_buf_clear_namespace(bufnr, progress_ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(bufnr, the_client.progress_ns, 0, -1)
   -- TODO: Highlight is very noisy when typing. Use sign or something else.
   for _, info in ipairs(result.processing) do
     local kind = info.kind or CoqFileProgressKind.Processing
     vim.highlight.range(
       bufnr,
-      progress_ns,
+      the_client.progress_ns,
       progress_highlight_kind[kind],
-      position_lsp_to_api(bufnr, info.range['start'], the_client.offset_encoding),
-      position_lsp_to_api(bufnr, info.range['end'], the_client.offset_encoding),
+      position_lsp_to_api(bufnr, info.range['start'], the_client.lc.offset_encoding),
+      position_lsp_to_api(bufnr, info.range['end'], the_client.lc.offset_encoding),
       { priority = vim.highlight.priorities.user }
     )
   end
 end
 
 ---@param bufnr buffer
-local function create_info_panel(bufnr)
+function CoqLSPNvim:create_info_panel(bufnr)
   local info_bufnr = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_option(info_bufnr, 'filetype', 'coq-goals')
-  buffers[bufnr].info_bufnr = info_bufnr
+  self.buffers[bufnr].info_bufnr = info_bufnr
 end
 
 ---@param bufnr buffer
-local function get_info_bufnr(bufnr)
-  local info_bufnr = buffers[bufnr].info_bufnr
+function CoqLSPNvim:get_info_bufnr(bufnr)
+  local info_bufnr = self.buffers[bufnr].info_bufnr
   if info_bufnr and vim.api.nvim_buf_is_valid(info_bufnr) then
     return info_bufnr
   end
-  create_info_panel(bufnr)
-  return buffers[bufnr].info_bufnr
+  self:create_info_panel(bufnr)
+  return self.buffers[bufnr].info_bufnr
 end
 
 ---@param bufnr? buffer
-local function open_info_panel(bufnr)
+function CoqLSPNvim:open_info_panel(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
   vim.cmd.sbuffer {
-    args = { get_info_bufnr(bufnr) },
+    args = { self:get_info_bufnr(bufnr) },
     mods = { keepjumps = true, keepalt = true, vertical = true, split = 'belowright'},
   }
   vim.cmd.clearjumps()
@@ -223,7 +241,7 @@ end
 
 ---@param answer GoalAnswer
 ---@param position MarkPosition Don't use answer.position because buffer content may have changed.
-local function show_goals(answer, position)
+function CoqLSPNvim:show_goals(answer, position)
   local bufnr = vim.uri_to_bufnr(answer.textDocument.uri)
   local goal_config = answer.goals or {}
   local goals = goal_config.goals or {}
@@ -235,43 +253,41 @@ local function show_goals(answer, position)
   lines[#lines+1] = vim.fn.bufname(bufnr) .. ':' .. position[1] .. ':' .. (position[2] + 1)
   -- NOTE: each Pp can contain newline, which isn't allowed by nvim_buf_set_lines
   vim.list_extend(lines, vim.split(table.concat(rendered, '\n\n\n────────────────────────────────────────────────────────────\n'), '\n'))
-  vim.api.nvim_buf_set_lines(get_info_bufnr(bufnr), 0, -1, false, lines)
+  vim.api.nvim_buf_set_lines(self:get_info_bufnr(bufnr), 0, -1, false, lines)
 end
 
 ---@param bufnr? buffer registered buffer
 ---@param position? MarkPosition
-local function goals_async(bufnr, position)
-  assert(the_client)
+function CoqLSPNvim:goals_async(bufnr, position)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   position = position or guess_position(bufnr)
-  local cancel_old = buffers[bufnr].cancel_goals
+  local cancel_old = self.buffers[bufnr].cancel_goals
   if cancel_old then
-    buffers[bufnr].cancel_goals = nil
+    self.buffers[bufnr].cancel_goals = nil
     cancel_old()
   end
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
-    position = make_position_params(bufnr, position, the_client.offset_encoding)
+    position = make_position_params(bufnr, position, self.lc.offset_encoding)
   }
-  local cancel = request_async(the_client, bufnr, 'proof/goals', params, function(err, result)
-    buffers[bufnr].cancel_goals = nil
+  local cancel = request_async(self.lc, bufnr, 'proof/goals', params, function(err, result)
+    self.buffers[bufnr].cancel_goals = nil
     if err then return end
-    show_goals(result, position)
+    self:show_goals(result, position)
   end)
-  buffers[bufnr].cancel_goals = cancel
+  self.buffers[bufnr].cancel_goals = cancel
 end
 
-local function goals_async_debounced()
-  assert(debounce_timer)
+function CoqLSPNvim:goals_async_debounced()
   -- NOTE: Stopping the timer doesn't touch already scheduled callbacks.
-  debounce_timer:stop()
-  debounce_timer:start(
-    config.goals_debounce,
+  self.debounce_timer:stop()
+  self.debounce_timer:start(
+    self.config.goals_debounce,
     0,
     vim.schedule_wrap(function()
       local bufnr = vim.api.nvim_get_current_buf()
-      if buffers[bufnr] then
-        goals_async(bufnr)
+      if self.buffers[bufnr] then
+        self:goals_async(bufnr)
       end
     end)
   )
@@ -279,33 +295,31 @@ end
 
 ---@param bufnr? buffer registered buffer
 ---@param position? MarkPosition
-local function goals_sync(bufnr, position)
-  assert(the_client)
+function CoqLSPNvim:goals_sync(bufnr, position)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   position = position or guess_position(bufnr)
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
-    position = make_position_params(bufnr, position, the_client.offset_encoding)
+    position = make_position_params(bufnr, position, self.lc.offset_encoding)
   }
-  local request_result, err = the_client.request_sync('proof/goals', params, 500, bufnr)
+  local request_result, err = self.lc.request_sync('proof/goals', params, 500, bufnr)
   if err then
     vim.notify('goals_sync() failed: ' .. err, vim.log.levels.ERROR)
     return
   end
   assert(request_result)
   if request_result.err then return end
-  show_goals(request_result.result, position)
+  self:show_goals(request_result.result, position)
 end
 
 
 ---@param bufnr? buffer
-local function get_document(bufnr)
-  assert(the_client)
+function CoqLSPNvim:get_document(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
-  local request_result, err = the_client.request_sync('coq/getDocument', params, 500, bufnr)
+  local request_result, err = self.lc.request_sync('coq/getDocument', params, 500, bufnr)
   if err then
     vim.notify('get_document() failed: ' .. err, vim.log.levels.ERROR)
     return
@@ -317,13 +331,12 @@ end
 
 
 ---@param bufnr? buffer
-local function save_vo(bufnr)
-  assert(the_client)
+function CoqLSPNvim:save_vo(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
-  local request_result, err = the_client.request_sync('coq/saveVo', params, 500, bufnr)
+  local request_result, err = self.lc.request_sync('coq/saveVo', params, 500, bufnr)
   if err then
     vim.notify('save_vo() failed: ' .. err, vim.log.levels.ERROR)
     return
@@ -336,54 +349,47 @@ local function save_vo(bufnr)
 end
 
 
-local ag = vim.api.nvim_create_augroup("coq-lsp", { clear = true })
-
 ---@param bufnr buffer
-local function unregister(bufnr)
-  assert(buffers[bufnr])
-  vim.api.nvim_buf_clear_namespace(bufnr, progress_ns, 0, -1)
-  vim.api.nvim_clear_autocmds { group = ag, buffer = bufnr }
-  if buffers[bufnr].info_bufnr then
-    vim.api.nvim_buf_delete(buffers[bufnr].info_bufnr, { force = true })
+function CoqLSPNvim:unregister(bufnr)
+  assert(self.buffers[bufnr])
+  vim.api.nvim_buf_clear_namespace(bufnr, self.progress_ns, 0, -1)
+  vim.api.nvim_clear_autocmds { group = self.ag, buffer = bufnr }
+  if self.buffers[bufnr].info_bufnr then
+    vim.api.nvim_buf_delete(self.buffers[bufnr].info_bufnr, { force = true })
   end
-  buffers[bufnr] = nil
+  self.buffers[bufnr] = nil
 end
 
 ---@param bufnr buffer
-local function register(bufnr)
-  assert(buffers[bufnr] == nil)
-  buffers[bufnr] = {}
-  create_info_panel(bufnr)
-  open_info_panel(bufnr)
+function CoqLSPNvim:register(bufnr)
+  assert(self.buffers[bufnr] == nil)
+  self.buffers[bufnr] = {}
+  self:create_info_panel(bufnr)
+  self:open_info_panel(bufnr)
   vim.api.nvim_create_autocmd({"CursorMoved", "CursorMovedI"}, {
-    group = ag,
+    group = self.ag,
     buffer = bufnr,
     desc = "Request proof/goals on cursor movement",
-    callback = goals_async_debounced,
+    callback = function() self:goals_async_debounced() end,
   })
   -- nvim bug? If the current coq buf is the only valid buffer and I bwipeout
   -- that buffer, this buffer is newly added to buffer list.
   vim.api.nvim_create_autocmd({"BufDelete", "LspDetach"}, {
-    group = ag,
+    group = self.ag,
     buffer = bufnr,
     desc = "Unregister deleted/detached buffer",
-    callback = function(ev) unregister(ev.buf) end,
+    callback = function(ev) self:unregister(ev.buf) end,
   })
-  goals_async(bufnr)
+  self:goals_async(bufnr)
 end
 
-local function stop()
-  assert(the_client)
-  assert(debounce_timer)
-  -- TODO: maybe no need to force after https://github.com/ejgallego/coq-lsp/pull/375
-  the_client.stop(true)
-  the_client = nil
-  debounce_timer:stop()
-  debounce_timer:close()
-  for bufnr, _ in pairs(buffers) do
-    unregister(bufnr)
+function CoqLSPNvim:dispose()
+  self.debounce_timer:stop()
+  self.debounce_timer:close()
+  for bufnr, _ in pairs(self.buffers) do
+    self:unregister(bufnr)
   end
-  vim.api.nvim_clear_autocmds{ group = ag }
+  vim.api.nvim_clear_autocmds{ group = self.ag }
 end
 
 ---@param user_on_attach? fun(client: lsp.Client, bufnr: buffer)
@@ -391,17 +397,29 @@ end
 local function make_on_attach(user_on_attach)
   return function(client, bufnr)
     if not the_client then
-      the_client = client
-      debounce_timer = assert(vim.loop.new_timer(), 'Could not create timer')
+      the_client = CoqLSPNvim:new(client)
     elseif the_client ~= client then
       error('coq-lsp client must be unique')
     end
-    if not buffers[bufnr] then
-      register(bufnr)
+    if not the_client.buffers[bufnr] then
+      the_client:register(bufnr)
     end
     if user_on_attach then
       user_on_attach(client, bufnr)
     end
+  end
+end
+
+local function make_on_exit(user_on_exit)
+  return function(code, signal, client_id)
+    if user_on_exit then
+      user_on_exit(code, signal, client_id)
+    end
+    -- NOTE: on_exit runs in_fast_event
+    vim.schedule(function()
+      assert(the_client):dispose()
+      the_client = nil
+    end)
   end
 end
 
@@ -415,22 +433,17 @@ local function setup(opts)
   })
   local user_on_attach = opts.lsp.on_attach
   opts.lsp.on_attach = make_on_attach(user_on_attach)
+  local user_on_exit = opts.lsp.on_exit
+  opts.lsp.on_exit = make_on_exit(user_on_exit)
   require('lspconfig').coq_lsp.setup(opts.lsp)
 end
 
-local function status()
-  vim.print('client', the_client)
-  vim.print('config', config)
-  vim.print('buffers', buffers)
-end
-
 return {
-  get_document = get_document,
-  goals_async = goals_async,
-  goals_sync = goals_sync,
-  panels = open_info_panel,
-  save_vo = save_vo,
+  client = function() return the_client end,
+  get_document = function () assert(the_client):get_document() end,
+  goals_async = function() assert(the_client):goals_async() end,
+  goals_sync = function() assert(the_client):goals_sync() end,
+  panels = function() assert(the_client):open_info_panel() end,
+  save_vo = function() assert(the_client):save_vo() end,
   setup = setup,
-  status = status,
-  stop = stop,
 }
