@@ -188,7 +188,7 @@ end
 ---@param bufnr buffer
 function CoqLSPNvim:create_info_panel(bufnr)
   local info_bufnr = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_option(info_bufnr, 'filetype', 'coq-goals')
+  vim.bo[info_bufnr].filetype = 'coq-goals'
   self.buffers[bufnr].info_bufnr = info_bufnr
 end
 
@@ -208,7 +208,9 @@ function CoqLSPNvim:open_info_panel(bufnr)
   local win = vim.api.nvim_get_current_win()
   vim.cmd.sbuffer {
     args = { self:get_info_bufnr(bufnr) },
-    mods = { keepjumps = true, keepalt = true, vertical = true, split = 'belowright'},
+    -- TODO: customization
+    -- See `:h nvim_parse_cmd`. Note that the "split size" is `range`.
+    mods = { keepjumps = true, keepalt = true, vertical = true, split = 'belowright' },
   }
   vim.cmd.clearjumps()
   vim.api.nvim_set_current_win(win)
@@ -344,7 +346,7 @@ function CoqLSPNvim:save_vo(bufnr)
   assert(request_result)
   if request_result.err then
     vim.notify('save_vo() failed:', vim.log.levels.ERROR)
-    vim.pretty_print(request_result.err)
+    vim.print(request_result.err)
   end
 end
 
