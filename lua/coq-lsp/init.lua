@@ -400,7 +400,7 @@ local function make_on_attach(user_on_attach)
   return function(client, bufnr)
     if not the_client then
       the_client = CoqLSPNvim:new(client)
-    elseif the_client ~= client then
+    elseif the_client.lc ~= client then
       error('coq-lsp client must be unique')
     end
     if not the_client.buffers[bufnr] then
