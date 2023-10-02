@@ -61,3 +61,7 @@ require'coq-lsp'.setup {
   },
 }
 ```
+
+NOTE:
+Do not call `lspconfig.coq_lsp.setup()` yourself.
+`require'coq-lsp'.setup` does it for you.
