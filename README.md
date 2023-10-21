@@ -65,3 +65,7 @@ require'coq-lsp'.setup {
 NOTE:
 Do not call `lspconfig.coq_lsp.setup()` yourself.
 `require'coq-lsp'.setup` does it for you.
+
+## See also
+* [coq.ctags](https://github.com/tomtomjhj/coq.ctags) for go-to-definition.
+* [vscoq.nvim](https://github.com/tomtomjhj/vscoq.nvim) for `vscoqtop` client.
