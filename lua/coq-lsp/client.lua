@@ -11,6 +11,9 @@ local render = require('coq-lsp.render')
 local CoqLSPNvim = {}
 CoqLSPNvim.__index = CoqLSPNvim
 
+---@type string[] command names
+local commands = {}
+
 ---@param client lsp.Client
 ---@param config coqlsp.config
 function CoqLSPNvim:new(client, config)
@@ -82,6 +85,8 @@ function CoqLSPNvim:open_info_panel(bufnr)
   vim.cmd.clearjumps()
   vim.api.nvim_set_current_win(win)
 end
+
+commands[#commands + 1] = 'open_info_panel'
 
 ---@param answer coqlsp.GoalAnswer
 ---@param position MarkPosition Don't use answer.position because buffer content may have changed.
@@ -185,22 +190,27 @@ function CoqLSPNvim:get_document(bufnr)
 end
 
 ---@param bufnr? buffer
-function CoqLSPNvim:save_vo(bufnr)
+function CoqLSPNvim:saveVo(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
   local request_result, err = self.lc.request_sync('coq/saveVo', params, 500, bufnr)
   if err then
-    vim.notify('save_vo() failed: ' .. err, vim.log.levels.ERROR)
+    vim.notify('saveVo() failed: ' .. err, vim.log.levels.ERROR)
     return
   end
   assert(request_result)
   if request_result.err then
-    vim.notify('save_vo() failed:', vim.log.levels.ERROR)
-    vim.print(request_result.err)
+    vim.notify(
+      ('saveVo() failed:\n%s'):format(vim.inspect(request_result.err)),
+      vim.log.levels.ERROR
+    )
+    return
   end
+  vim.notify(('saved %s'):format(params.textDocument.uri .. 'o'))
 end
+commands[#commands + 1] = 'saveVo'
 
 ---@param bufnr buffer
 function CoqLSPNvim:unregister(bufnr)
@@ -219,6 +229,7 @@ function CoqLSPNvim:register(bufnr)
   self.buffers[bufnr] = {}
   self:create_info_panel(bufnr)
   self:open_info_panel(bufnr)
+
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
     group = self.ag,
     buffer = bufnr,
@@ -237,7 +248,31 @@ function CoqLSPNvim:register(bufnr)
       self:unregister(ev.buf)
     end,
   })
+
+  vim.api.nvim_buf_create_user_command(bufnr, 'CoqLsp', function(opts)
+    self:command(opts.args)
+  end, {
+    bang = true,
+    nargs = 1,
+    complete = function(arglead, _, _)
+      return vim.tbl_filter(function(command)
+        return command:find(arglead) ~= nil
+      end, commands)
+    end,
+  })
+
   self:goals_async(bufnr)
+end
+
+---@param args string
+function CoqLSPNvim:command(args)
+  local _, to, subcommand = args:find('([%w_]+)%s*')
+  if not vim.tbl_contains(commands, subcommand) then
+    error(('"%s" is not a valid CoqLsp command'):format(subcommand))
+  end
+  args = args:sub(to + 1)
+  -- TODO: check validity of args? maybe add some spec to commands. Maybe a pattern?
+  CoqLSPNvim[subcommand](self, #args > 0 and args or nil)
 end
 
 function CoqLSPNvim:dispose()
