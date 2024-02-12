@@ -87,26 +87,23 @@ end
 ---@param position MarkPosition Don't use answer.position because buffer content may have changed.
 function CoqLSPNvim:show_goals(answer, position)
   local bufnr = vim.uri_to_bufnr(answer.textDocument.uri)
-  local goal_config = answer.goals or {}
-  local goals = goal_config.goals or {}
-  local rendered = {}
-  for i, goal in ipairs(goals) do
-    rendered[#rendered + 1] = render.Goal(i, #goals, goal)
+  local info_bufnr = self:get_info_bufnr(bufnr)
+
+  local wins = {} ---@type table<window, vim.fn.winsaveview.ret>
+  for _, win in ipairs(vim.fn.win_findbuf(info_bufnr) or {}) do
+    vim.api.nvim_win_call(win, function()
+      wins[win] = vim.fn.winsaveview()
+    end)
   end
-  local lines = {}
-  lines[#lines + 1] = vim.fn.bufname(bufnr) .. ':' .. position[1] .. ':' .. (position[2] + 1)
-  -- NOTE: each Pp can contain newline, which isn't allowed by nvim_buf_set_lines
-  vim.list_extend(
-    lines,
-    vim.split(
-      table.concat(
-        rendered,
-        '\n\n\n────────────────────────────────────────────────────────────\n'
-      ),
-      '\n'
-    )
-  )
-  vim.api.nvim_buf_set_lines(self:get_info_bufnr(bufnr), 0, -1, false, lines)
+
+  local lines = render.GoalAnswer(answer, position)
+  vim.api.nvim_buf_set_lines(info_bufnr, 0, -1, false, lines)
+
+  for win, view in pairs(wins) do
+    vim.api.nvim_win_call(win, function()
+      vim.fn.winrestview(view)
+    end)
+  end
 end
 
 ---@param bufnr? buffer registered buffer

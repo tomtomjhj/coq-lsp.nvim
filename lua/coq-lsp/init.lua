@@ -9,6 +9,7 @@ local default_config = {
   -- TODO: implement it; should be dynamically configurable
   show_goals_on = 'cursor',
   goals_debounce = 150,
+  -- TODO: info panel mode: global panel or one for each buffer
 }
 
 ---@type table<integer, CoqLSPNvim>
