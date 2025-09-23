@@ -7,7 +7,7 @@ A simple Neovim client for [`coq-lsp`](https://github.com/ejgallego/coq-lsp/).
 
 ## Setup
 ```vim
-Plug 'neovim/nvim-lspconfig'
+Plug 'neovim/nvim-lspconfig' " only on neovim < 0.11
 Plug 'whonore/Coqtail' " for ftdetect, syntax, basic ftplugin, etc
 Plug 'tomtomjhj/coq-lsp.nvim'
 
@@ -61,12 +61,11 @@ require'coq-lsp'.setup {
 ```
 
 NOTE:
-Do not call `lspconfig.coq_lsp.setup()` yourself.
+Do not call `lspconfig.coq_lsp.setup()` or `vim.lsp.enable()` yourself.
 `require'coq-lsp'.setup` does it for you.
 
 ## Features not implemented yet
 * Fancy proofview rendering
-* Make lspconfig optional
 
 ## See also
 * [coq.ctags](https://github.com/tomtomjhj/coq.ctags) for go-to-definition.
