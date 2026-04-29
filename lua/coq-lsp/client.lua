@@ -308,7 +308,9 @@ function CoqLSPNvim:register(bufnr)
     end,
   })
 
-  self:goals_async(bufnr)
+  if vim.api.nvim_get_current_buf() == bufnr then
+    self:goals_async(bufnr)
+  end
 end
 
 ---@param args string
