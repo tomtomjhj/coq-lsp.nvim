@@ -4,6 +4,7 @@ local render = require('coq-lsp.render')
 ---@class CoqLSPNvim
 ---@field lc vim.lsp.Client
 ---@field buffers table<buffer, { info_bufnr: buffer, cancel_goals?: fun() }>
+---@field panel_wins table<integer, window> tabpage -> info panel window
 ---@field debounce_timer uv.uv_timer_t
 ---@field config coqlsp.config
 ---@field progress_ns integer
@@ -20,6 +21,7 @@ function CoqLSPNvim:new(client, config)
   local new = {}
   new.lc = client
   new.buffers = {}
+  new.panel_wins = {}
   new.debounce_timer = assert(vim.uv.new_timer(), 'Could not create timer')
   new.config = config
   new.progress_ns = vim.api.nvim_create_namespace('coq-lsp-progress-' .. client.id)
@@ -75,18 +77,55 @@ end
 ---@param bufnr? buffer
 function CoqLSPNvim:open_info_panel(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local info_bufnr = self:get_info_bufnr(bufnr)
+  local tab = vim.api.nvim_get_current_tabpage()
+
+  local existing = self.panel_wins[tab]
+  if existing and vim.api.nvim_win_is_valid(existing) then
+    vim.api.nvim_win_set_buf(existing, info_bufnr)
+    return
+  end
+
   local win = vim.api.nvim_get_current_win()
   vim.cmd.sbuffer {
-    args = { self:get_info_bufnr(bufnr) },
+    args = { info_bufnr },
     -- TODO: customization
     -- See `:h nvim_parse_cmd`. Note that the "split size" is `range`.
     mods = { keepjumps = true, keepalt = true, vertical = true, split = 'belowright' },
   }
   vim.cmd.clearjumps()
+  local panel_win = vim.api.nvim_get_current_win()
   vim.api.nvim_set_current_win(win)
+
+  self.panel_wins[tab] = panel_win
+  vim.api.nvim_create_autocmd('WinClosed', {
+    group = self.ag,
+    pattern = tostring(panel_win),
+    once = true,
+    desc = 'Forget closed info panel window',
+    callback = function()
+      self.panel_wins[tab] = nil
+    end,
+  })
 end
 
 commands[#commands + 1] = 'open_info_panel'
+
+---Retarget the current tab's info panel to the current coq buffer, if any.
+---No-op when the tab has no panel (respects manual close) or the current
+---buffer isn't a registered coq buffer.
+function CoqLSPNvim:retarget_panel()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if not self.buffers[bufnr] then
+    return
+  end
+  local tab = vim.api.nvim_get_current_tabpage()
+  local panel_win = self.panel_wins[tab]
+  if not (panel_win and vim.api.nvim_win_is_valid(panel_win)) then
+    return
+  end
+  vim.api.nvim_win_set_buf(panel_win, self:get_info_bufnr(bufnr))
+end
 
 ---@param answer coqlsp.GoalAnswer
 ---@param position MarkPosition Don't use answer.position because buffer content may have changed.
@@ -236,6 +275,14 @@ function CoqLSPNvim:register(bufnr)
     desc = 'Request proof/goals on cursor movement',
     callback = function()
       self:goals_async_debounced()
+    end,
+  })
+  vim.api.nvim_create_autocmd('BufEnter', {
+    group = self.ag,
+    buffer = bufnr,
+    desc = 'Retarget info panel to focused coq buffer',
+    callback = function()
+      self:retarget_panel()
     end,
   })
   -- nvim bug? If the current coq buf is the only valid buffer and I bwipeout
