@@ -3,13 +3,14 @@ local M = {}
 ---@class coqlsp.config
 ---@field goals_debounce integer
 ---@field show_goals_on "manual"|"cursor"
+---@field info_panel_mode "tab"|"buffer"
 
 ---@type coqlsp.config
-local default_config = {
+M.config = {
   -- TODO: implement it; should be dynamically configurable
   show_goals_on = 'cursor',
   goals_debounce = 150,
-  -- TODO: info panel mode: global panel or one for each buffer
+  info_panel_mode = 'tab',
 }
 
 ---@type table<integer, CoqLSPNvim>
@@ -22,7 +23,7 @@ local function make_on_init(user_on_init)
       vim.print('[coq-lsp.nvim] on_init failed', CoqLSPNvim)
       return
     end
-    M.clients[client.id] = CoqLSPNvim:new(client, default_config)
+    M.clients[client.id] = CoqLSPNvim:new(client, M.config)
     if user_on_init then
       user_on_init(client, initialize_result)
     end
@@ -63,6 +64,7 @@ end
 ---@param opts { coq_lsp_nvim?: table<string,any>, lsp?: table<string,any> }
 function M.setup(opts)
   opts = opts or {}
+  M.config = vim.tbl_extend('force', M.config, opts.coq_lsp_nvim or {})
   opts.lsp = opts.lsp or {}
   opts.lsp.handlers = vim.tbl_extend('keep', opts.lsp.handlers or {}, {
     ['$/coq/fileProgress'] = fileProgress_notification_handler,
@@ -74,12 +76,12 @@ function M.setup(opts)
   local user_on_exit = opts.lsp.on_exit
   opts.lsp.on_exit = make_on_exit(user_on_exit)
 
-  local config = {
+  local lsp_defaults = {
     cmd = { 'coq-lsp' },
     filetypes = { 'coq' },
     root_markers = { '_CoqProject', '.git' },
   }
-  vim.lsp.config('coq_lsp', vim.tbl_deep_extend('force', config, opts.lsp))
+  vim.lsp.config('coq_lsp', vim.tbl_deep_extend('force', lsp_defaults, opts.lsp))
   vim.lsp.enable('coq_lsp')
 end
 

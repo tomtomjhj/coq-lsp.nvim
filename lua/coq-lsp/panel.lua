@@ -1,8 +1,16 @@
 -- Info-panel window and info-buffer management.
+--
+-- A panel is a UI artifact tied to a coq buffer, not to an LSP client.
+--
+-- `panel_wins` is keyed by an opaque "panel key" chosen by the caller —
+-- typically a tabpage id (one panel per tab) or a coq bufnr (one panel per
+-- buffer). The panel module doesn't care which; it just maps key -> window.
 
 local M = {}
 
----@type table<integer, window> tabpage -> info panel window
+---@alias coqlsp.PanelKey integer
+
+---@type table<coqlsp.PanelKey, window>
 local panel_wins = {}
 ---@type table<buffer, buffer> coq bufnr -> info bufnr
 local info_bufnrs = {}
@@ -38,15 +46,14 @@ function M.render(bufnr, lines)
   end
 end
 
----Open (or retarget) the info panel in the current tab to show `bufnr`'s goals.
----If the current tab already has a panel, retarget it without creating a new split.
----@param bufnr? buffer coq buffer (defaults to current)
-function M.open(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
+---Open (or retarget) the info panel for `key` to show `bufnr`'s goals.
+---If the key already has a valid panel window, retarget it without creating a new split.
+---@param key coqlsp.PanelKey caller-chosen scope (tabpage id or bufnr)
+---@param bufnr buffer coq buffer
+function M.open(key, bufnr)
   local info_bufnr = M.get_info_bufnr(bufnr)
-  local tab = vim.api.nvim_get_current_tabpage()
 
-  local existing = panel_wins[tab]
+  local existing = panel_wins[key]
   if existing and vim.api.nvim_win_is_valid(existing) then
     vim.api.nvim_win_set_buf(existing, info_bufnr)
     return
@@ -60,16 +67,16 @@ function M.open(bufnr)
     mods = { keepjumps = true, keepalt = true, vertical = true, split = 'belowright' },
   }
   vim.cmd.clearjumps()
-  panel_wins[tab] = vim.api.nvim_get_current_win()
+  panel_wins[key] = vim.api.nvim_get_current_win()
   vim.api.nvim_set_current_win(cur_win)
 end
 
----Retarget the current tab's panel (if any) to `bufnr`'s info buffer.
----No-op if there is no panel in this tab (respects manual close).
+---Retarget `key`'s panel (if any) to `bufnr`'s info buffer.
+---No-op if the key has no valid panel (respects manual close).
+---@param key coqlsp.PanelKey
 ---@param bufnr buffer coq buffer
-function M.retarget(bufnr)
-  local tab = vim.api.nvim_get_current_tabpage()
-  local win = panel_wins[tab]
+function M.retarget(key, bufnr)
+  local win = panel_wins[key]
   if not (win and vim.api.nvim_win_is_valid(win)) then
     return
   end
@@ -83,9 +90,9 @@ vim.api.nvim_create_autocmd('WinClosed', {
   desc = 'Forget closed coq-lsp info panel windows',
   callback = function(ev)
     local closed = tonumber(ev.match)
-    for tab, win in pairs(panel_wins) do
+    for key, win in pairs(panel_wins) do
       if win == closed then
-        panel_wins[tab] = nil
+        panel_wins[key] = nil
       end
     end
   end,

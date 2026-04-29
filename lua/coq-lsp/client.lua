@@ -56,9 +56,16 @@ function CoqLSPNvim:fileProgress(result)
   end
 end
 
+---@param bufnr buffer
+---@return coqlsp.PanelKey
+function CoqLSPNvim:panel_key(bufnr)
+  return self.config.info_panel_mode == 'buffer' and bufnr or vim.api.nvim_get_current_tabpage()
+end
+
 ---@param bufnr? buffer
 function CoqLSPNvim:open_info_panel(bufnr)
-  panel.open(bufnr or vim.api.nvim_get_current_buf())
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  panel.open(self:panel_key(bufnr), bufnr)
 end
 commands[#commands + 1] = 'open_info_panel'
 
@@ -182,7 +189,7 @@ end
 function CoqLSPNvim:register(bufnr)
   assert(self.buffers[bufnr] == nil)
   self.buffers[bufnr] = {}
-  panel.open(bufnr)
+  panel.open(self:panel_key(bufnr), bufnr)
 
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
     group = self.ag,
@@ -197,7 +204,7 @@ function CoqLSPNvim:register(bufnr)
     buffer = bufnr,
     desc = 'Retarget info panel to focused coq buffer',
     callback = function(ev)
-      panel.retarget(ev.buf)
+      panel.retarget(self:panel_key(ev.buf), ev.buf)
     end,
   })
   vim.api.nvim_create_autocmd('LspDetach', {
