@@ -6,18 +6,13 @@ local M = {}
 ---@param offset_encoding lsp.PositionEncodingKind
 ---@return APIPosition
 function M.position_lsp_to_api(bufnr, position, offset_encoding)
-  local idx = vim.lsp.util._get_line_byte_from_position(
-    bufnr,
-    { line = position.line, character = position.character },
-    offset_encoding
-  )
-  return { position.line, idx }
-end
-
-local str_utfindex = vim.fn.has('nvim-0.11') == 1 and function(s, encoding, index)
-  return vim.str_utfindex(s, encoding, index, false)
-end or function(s, encoding, index)
-  return vim.lsp.util._str_utfindex_enc(s, index, encoding)
+  local col = position.character
+  if col > 0 then
+    local line = vim.api.nvim_buf_get_lines(bufnr, position.line, position.line + 1, false)[1]
+      or ''
+    col = vim.str_byteindex(line, offset_encoding, col, false)
+  end
+  return { position.line, col }
 end
 
 ---@param bufnr buffer
@@ -32,7 +27,7 @@ function M.make_position_params(bufnr, position, offset_encoding)
     return { line = 0, character = 0 }
   end
 
-  col = str_utfindex(line, offset_encoding, col)
+  col = vim.str_utfindex(line, offset_encoding, col, false)
 
   return { line = row, character = col }
 end
@@ -47,17 +42,17 @@ function M.guess_position(bufnr)
   return vim.api.nvim_win_get_cursor(win)
 end
 
----@param client lsp.Client
+---@param client vim.lsp.Client
 ---@param bufnr integer
 ---@param method string
 ---@param params table
 ---@param handler? lsp.Handler
 ---@return fun()|nil cancel function to cancel the request
 function M.request_async(client, bufnr, method, params, handler)
-  local request_success, request_id = client.request(method, params, handler, bufnr)
+  local request_success, request_id = client:request(method, params, handler, bufnr)
   if request_success then
     return function()
-      client.cancel_request(assert(request_id))
+      client:cancel_request(assert(request_id))
     end
   end
 end

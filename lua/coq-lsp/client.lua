@@ -2,9 +2,9 @@ local util = require('coq-lsp.util')
 local render = require('coq-lsp.render')
 
 ---@class CoqLSPNvim
----@field lc lsp.Client
+---@field lc vim.lsp.Client
 ---@field buffers table<buffer, { info_bufnr: buffer, cancel_goals?: fun() }>
----@field debounce_timer uv_timer_t
+---@field debounce_timer uv.uv_timer_t
 ---@field config coqlsp.config
 ---@field progress_ns integer
 ---@field ag integer
@@ -14,13 +14,13 @@ CoqLSPNvim.__index = CoqLSPNvim
 ---@type string[] command names
 local commands = {}
 
----@param client lsp.Client
+---@param client vim.lsp.Client
 ---@param config coqlsp.config
 function CoqLSPNvim:new(client, config)
   local new = {}
   new.lc = client
   new.buffers = {}
-  new.debounce_timer = assert(vim.loop.new_timer(), 'Could not create timer')
+  new.debounce_timer = assert(vim.uv.new_timer(), 'Could not create timer')
   new.config = config
   new.progress_ns = vim.api.nvim_create_namespace('coq-lsp-progress-' .. client.id)
   new.ag = vim.api.nvim_create_augroup('coq-lsp-' .. client.id, { clear = true })
@@ -44,13 +44,13 @@ function CoqLSPNvim:fileProgress(result)
   -- TODO: Highlight is very noisy when typing. Use sign or something else.
   for _, info in ipairs(result.processing) do
     local kind = info.kind or CoqFileProgressKind.Processing
-    vim.highlight.range(
+    vim.hl.range(
       bufnr,
       self.progress_ns,
       progress_highlight_kind[kind],
       util.position_lsp_to_api(bufnr, info.range['start'], self.lc.offset_encoding),
       util.position_lsp_to_api(bufnr, info.range['end'], self.lc.offset_encoding),
-      { priority = vim.highlight.priorities.user }
+      { priority = vim.hl.priorities.user }
     )
   end
 end
@@ -159,7 +159,7 @@ function CoqLSPNvim:goals_sync(bufnr, position)
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
     position = util.make_position_params(bufnr, position, self.lc.offset_encoding),
   }
-  local request_result, err = self.lc.request_sync('proof/goals', params, 500, bufnr)
+  local request_result, err = self.lc:request_sync('proof/goals', params, 500, bufnr)
   if err then
     vim.notify('goals_sync() failed: ' .. err, vim.log.levels.ERROR)
     return
@@ -177,7 +177,7 @@ function CoqLSPNvim:get_document(bufnr)
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
-  local request_result, err = self.lc.request_sync('coq/getDocument', params, 500, bufnr)
+  local request_result, err = self.lc:request_sync('coq/getDocument', params, 500, bufnr)
   if err then
     vim.notify('get_document() failed: ' .. err, vim.log.levels.ERROR)
     return
@@ -195,7 +195,7 @@ function CoqLSPNvim:saveVo(bufnr)
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
-  local request_result, err = self.lc.request_sync('coq/saveVo', params, 500, bufnr)
+  local request_result, err = self.lc:request_sync('coq/saveVo', params, 500, bufnr)
   if err then
     vim.notify('saveVo() failed: ' .. err, vim.log.levels.ERROR)
     return

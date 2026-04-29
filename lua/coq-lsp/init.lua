@@ -29,8 +29,8 @@ local function make_on_init(user_on_init)
   end
 end
 
----@param user_on_attach? fun(client: lsp.Client, bufnr: buffer)
----@return fun(client: lsp.Client, bufnr: buffer)
+---@param user_on_attach? fun(client: vim.lsp.Client, bufnr: buffer)
+---@return fun(client: vim.lsp.Client, bufnr: buffer)
 local function make_on_attach(user_on_attach)
   return function(client, bufnr)
     if not M.clients[client.id].buffers[bufnr] then
@@ -74,20 +74,13 @@ function M.setup(opts)
   local user_on_exit = opts.lsp.on_exit
   opts.lsp.on_exit = make_on_exit(user_on_exit)
 
-  if vim.fn.has('nvim-0.11') == 1 then
-    -- Use native LSP setup for Neovim 0.11+
-    local config = {
-        cmd = { 'coq-lsp' },
-        filetypes = { 'coq' },
-        root_markers = { '_CoqProject', '.git' },
-    }
-
-    vim.lsp.config('coq_lsp', vim.tbl_deep_extend('force', config, opts.lsp))
-    vim.lsp.enable('coq_lsp')
-  else
-    -- Fallback to lspconfig for older versions
-    require('lspconfig').coq_lsp.setup(opts.lsp)
-  end
+  local config = {
+    cmd = { 'coq-lsp' },
+    filetypes = { 'coq' },
+    root_markers = { '_CoqProject', '.git' },
+  }
+  vim.lsp.config('coq_lsp', vim.tbl_deep_extend('force', config, opts.lsp))
+  vim.lsp.enable('coq_lsp')
 end
 
 return M
