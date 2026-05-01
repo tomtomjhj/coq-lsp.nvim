@@ -43,6 +43,9 @@ require'coq-lsp'.setup {
     --   "tab"    = one shared panel per tab, tracks the focused coq buffer.
     --   "buffer" = one panel per coq buffer.
     info_panel_mode = 'tab',
+    -- If true, a manually closed panel stays closed until you explicitly
+    -- reopen it with `:CoqLsp open_info_panel`.
+    info_panel_sticky_close = true,
   },
 
   -- The configuration forwarded to `:help lspconfig-setup`.

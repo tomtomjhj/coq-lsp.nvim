@@ -4,6 +4,7 @@ local M = {}
 ---@field goals_debounce integer
 ---@field show_goals_on "manual"|"cursor"
 ---@field info_panel_mode "tab"|"buffer"
+---@field info_panel_sticky_close boolean
 
 ---@type coqlsp.config
 M.config = {
@@ -11,6 +12,7 @@ M.config = {
   show_goals_on = 'cursor',
   goals_debounce = 150,
   info_panel_mode = 'tab',
+  info_panel_sticky_close = true,
 }
 
 ---@type table<integer, CoqLSPNvim>
