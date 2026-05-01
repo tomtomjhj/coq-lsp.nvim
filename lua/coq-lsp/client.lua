@@ -1,10 +1,11 @@
 local util = require('coq-lsp.util')
 local render = require('coq-lsp.render')
+local panel = require('coq-lsp.panel')
 
 ---@class CoqLSPNvim
----@field lc lsp.Client
----@field buffers table<buffer, { info_bufnr: buffer, cancel_goals?: fun() }>
----@field debounce_timer uv_timer_t
+---@field lc vim.lsp.Client
+---@field buffers table<buffer, { cancel_goals?: fun() }>
+---@field debounce_timer uv.uv_timer_t
 ---@field config coqlsp.config
 ---@field progress_ns integer
 ---@field ag integer
@@ -14,13 +15,13 @@ CoqLSPNvim.__index = CoqLSPNvim
 ---@type string[] command names
 local commands = {}
 
----@param client lsp.Client
+---@param client vim.lsp.Client
 ---@param config coqlsp.config
 function CoqLSPNvim:new(client, config)
   local new = {}
   new.lc = client
   new.buffers = {}
-  new.debounce_timer = assert(vim.loop.new_timer(), 'Could not create timer')
+  new.debounce_timer = assert(vim.uv.new_timer(), 'Could not create timer')
   new.config = config
   new.progress_ns = vim.api.nvim_create_namespace('coq-lsp-progress-' .. client.id)
   new.ag = vim.api.nvim_create_augroup('coq-lsp-' .. client.id, { clear = true })
@@ -44,71 +45,35 @@ function CoqLSPNvim:fileProgress(result)
   -- TODO: Highlight is very noisy when typing. Use sign or something else.
   for _, info in ipairs(result.processing) do
     local kind = info.kind or CoqFileProgressKind.Processing
-    vim.highlight.range(
+    vim.hl.range(
       bufnr,
       self.progress_ns,
       progress_highlight_kind[kind],
       util.position_lsp_to_api(bufnr, info.range['start'], self.lc.offset_encoding),
       util.position_lsp_to_api(bufnr, info.range['end'], self.lc.offset_encoding),
-      { priority = vim.highlight.priorities.user }
+      { priority = vim.hl.priorities.user }
     )
   end
 end
 
 ---@param bufnr buffer
-function CoqLSPNvim:create_info_panel(bufnr)
-  local info_bufnr = vim.api.nvim_create_buf(false, true)
-  vim.bo[info_bufnr].filetype = 'coq-goals'
-  self.buffers[bufnr].info_bufnr = info_bufnr
-end
-
----@param bufnr buffer
-function CoqLSPNvim:get_info_bufnr(bufnr)
-  local info_bufnr = self.buffers[bufnr].info_bufnr
-  if info_bufnr and vim.api.nvim_buf_is_valid(info_bufnr) then
-    return info_bufnr
-  end
-  self:create_info_panel(bufnr)
-  return self.buffers[bufnr].info_bufnr
+---@return coqlsp.PanelKey
+function CoqLSPNvim:panel_key(bufnr)
+  return self.config.info_panel_mode == 'buffer' and bufnr or vim.api.nvim_get_current_tabpage()
 end
 
 ---@param bufnr? buffer
 function CoqLSPNvim:open_info_panel(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local win = vim.api.nvim_get_current_win()
-  vim.cmd.sbuffer {
-    args = { self:get_info_bufnr(bufnr) },
-    -- TODO: customization
-    -- See `:h nvim_parse_cmd`. Note that the "split size" is `range`.
-    mods = { keepjumps = true, keepalt = true, vertical = true, split = 'belowright' },
-  }
-  vim.cmd.clearjumps()
-  vim.api.nvim_set_current_win(win)
+  panel.open(self:panel_key(bufnr), bufnr)
 end
-
 commands[#commands + 1] = 'open_info_panel'
 
 ---@param answer coqlsp.GoalAnswer
 ---@param position MarkPosition Don't use answer.position because buffer content may have changed.
 function CoqLSPNvim:show_goals(answer, position)
   local bufnr = vim.uri_to_bufnr(answer.textDocument.uri)
-  local info_bufnr = self:get_info_bufnr(bufnr)
-
-  local wins = {} ---@type table<window, vim.fn.winsaveview.ret>
-  for _, win in ipairs(vim.fn.win_findbuf(info_bufnr) or {}) do
-    vim.api.nvim_win_call(win, function()
-      wins[win] = vim.fn.winsaveview()
-    end)
-  end
-
-  local lines = render.GoalAnswer(answer, position)
-  vim.api.nvim_buf_set_lines(info_bufnr, 0, -1, false, lines)
-
-  for win, view in pairs(wins) do
-    vim.api.nvim_win_call(win, function()
-      vim.fn.winrestview(view)
-    end)
-  end
+  panel.render(bufnr, render.GoalAnswer(answer, position))
 end
 
 ---@param bufnr? buffer registered buffer
@@ -159,7 +124,7 @@ function CoqLSPNvim:goals_sync(bufnr, position)
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
     position = util.make_position_params(bufnr, position, self.lc.offset_encoding),
   }
-  local request_result, err = self.lc.request_sync('proof/goals', params, 500, bufnr)
+  local request_result, err = self.lc:request_sync('proof/goals', params, 500, bufnr)
   if err then
     vim.notify('goals_sync() failed: ' .. err, vim.log.levels.ERROR)
     return
@@ -177,7 +142,7 @@ function CoqLSPNvim:get_document(bufnr)
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
-  local request_result, err = self.lc.request_sync('coq/getDocument', params, 500, bufnr)
+  local request_result, err = self.lc:request_sync('coq/getDocument', params, 500, bufnr)
   if err then
     vim.notify('get_document() failed: ' .. err, vim.log.levels.ERROR)
     return
@@ -195,7 +160,7 @@ function CoqLSPNvim:saveVo(bufnr)
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
-  local request_result, err = self.lc.request_sync('coq/saveVo', params, 500, bufnr)
+  local request_result, err = self.lc:request_sync('coq/saveVo', params, 500, bufnr)
   if err then
     vim.notify('saveVo() failed: ' .. err, vim.log.levels.ERROR)
     return
@@ -217,9 +182,6 @@ function CoqLSPNvim:unregister(bufnr)
   assert(self.buffers[bufnr])
   vim.api.nvim_buf_clear_namespace(bufnr, self.progress_ns, 0, -1)
   vim.api.nvim_clear_autocmds { group = self.ag, buffer = bufnr }
-  if self.buffers[bufnr].info_bufnr then
-    vim.api.nvim_buf_delete(self.buffers[bufnr].info_bufnr, { force = true })
-  end
   self.buffers[bufnr] = nil
 end
 
@@ -227,8 +189,7 @@ end
 function CoqLSPNvim:register(bufnr)
   assert(self.buffers[bufnr] == nil)
   self.buffers[bufnr] = {}
-  self:create_info_panel(bufnr)
-  self:open_info_panel(bufnr)
+  panel.open(self:panel_key(bufnr), bufnr)
 
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
     group = self.ag,
@@ -238,14 +199,22 @@ function CoqLSPNvim:register(bufnr)
       self:goals_async_debounced()
     end,
   })
-  -- nvim bug? If the current coq buf is the only valid buffer and I bwipeout
-  -- that buffer, this buffer is newly added to buffer list.
-  vim.api.nvim_create_autocmd({ 'BufDelete', 'LspDetach' }, {
+  vim.api.nvim_create_autocmd('BufEnter', {
     group = self.ag,
     buffer = bufnr,
-    desc = 'Unregister deleted/detached buffer',
+    desc = 'Retarget info panel to focused coq buffer',
     callback = function(ev)
-      self:unregister(ev.buf)
+      panel.retarget(self:panel_key(ev.buf), ev.buf)
+    end,
+  })
+  vim.api.nvim_create_autocmd('LspDetach', {
+    group = self.ag,
+    buffer = bufnr,
+    desc = 'Unregister detached buffer',
+    callback = function(ev)
+      if self.buffers[ev.buf] then
+        self:unregister(ev.buf)
+      end
     end,
   })
 
@@ -261,7 +230,9 @@ function CoqLSPNvim:register(bufnr)
     end,
   })
 
-  self:goals_async(bufnr)
+  if vim.api.nvim_get_current_buf() == bufnr then
+    self:goals_async(bufnr)
+  end
 end
 
 ---@param args string

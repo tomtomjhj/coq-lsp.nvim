@@ -40,7 +40,9 @@ require'coq-lsp'.setup {
   -- The configuration for coq-lsp.nvim.
   -- The following is the default configuration.
   coq_lsp_nvim = {
-    -- to be added
+    --   "tab"    = one shared panel per tab, tracks the focused coq buffer.
+    --   "buffer" = one panel per coq buffer.
+    info_panel_mode = 'tab',
   },
 
   -- The configuration forwarded to `:help lspconfig-setup`.

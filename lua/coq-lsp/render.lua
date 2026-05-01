@@ -14,7 +14,7 @@ function M.Goal(i, n, goal)
   lines[#lines + 1] = 'Goal ' .. i .. ' / ' .. n
   for _, hyp in ipairs(goal.hyps) do
     local line = table.concat(hyp.names, ', ') .. ' : ' .. hyp.ty
-    if hyp.def then
+    if type(hyp.def) == 'string' then
       line = line .. ' := ' .. hyp.def
     end
     vim.list_extend(lines, vim.split(line, '\n'))
