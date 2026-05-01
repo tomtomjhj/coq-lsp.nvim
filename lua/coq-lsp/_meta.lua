@@ -1,3 +1,6 @@
+---@alias buffer integer
+---@alias window integer
+
 ---Position for indexing used by most API functions (0-based line, 0-based column) (:h api-indexing).
 ---@class APIPosition: { [1]: integer, [2]: integer }
 
