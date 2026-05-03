@@ -2,7 +2,7 @@
 --
 -- A panel is a UI artifact tied to a coq buffer, not to an LSP client.
 --
--- `panel_wins` is keyed by an opaque "panel key" chosen by the caller —
+-- `panels` is keyed by an opaque "panel key" chosen by the caller —
 -- typically a tabpage id (one panel per tab) or a coq bufnr (one panel per
 -- buffer). The panel module doesn't care which; it just maps key -> window.
 
@@ -10,8 +10,9 @@ local M = {}
 
 ---@alias coqlsp.PanelKey integer
 
----@type table<coqlsp.PanelKey, window>
-local panel_wins = {}
+-- winid = open, false = dismissed, absent = never opened.
+---@type table<coqlsp.PanelKey, window|false>
+local panels = {}
 ---@type table<buffer, buffer> coq bufnr -> info bufnr
 local info_bufnrs = {}
 
@@ -53,7 +54,7 @@ end
 function M.open(key, bufnr)
   local info_bufnr = M.get_info_bufnr(bufnr)
 
-  local existing = panel_wins[key]
+  local existing = panels[key]
   if existing and vim.api.nvim_win_is_valid(existing) then
     vim.api.nvim_win_set_buf(existing, info_bufnr)
     return
@@ -67,8 +68,17 @@ function M.open(key, bufnr)
     mods = { keepjumps = true, keepalt = true, vertical = true, split = 'belowright' },
   }
   vim.cmd.clearjumps()
-  panel_wins[key] = vim.api.nvim_get_current_win()
+  panels[key] = vim.api.nvim_get_current_win()
   vim.api.nvim_set_current_win(cur_win)
+end
+
+---Like `open`, but respects a prior manual close.
+---@param key coqlsp.PanelKey
+---@param bufnr buffer coq buffer
+function M.ensure_open(key, bufnr)
+  if panels[key] ~= false then
+    M.open(key, bufnr)
+  end
 end
 
 ---Retarget `key`'s panel (if any) to `bufnr`'s info buffer.
@@ -76,7 +86,7 @@ end
 ---@param key coqlsp.PanelKey
 ---@param bufnr buffer coq buffer
 function M.retarget(key, bufnr)
-  local win = panel_wins[key]
+  local win = panels[key]
   if not (win and vim.api.nvim_win_is_valid(win)) then
     return
   end
@@ -87,12 +97,12 @@ local ag = vim.api.nvim_create_augroup('coq-lsp-panel', { clear = true })
 
 vim.api.nvim_create_autocmd('WinClosed', {
   group = ag,
-  desc = 'Forget closed coq-lsp info panel windows',
+  desc = 'Mark coq-lsp info panel as dismissed when closed',
   callback = function(ev)
     local closed = tonumber(ev.match)
-    for key, win in pairs(panel_wins) do
+    for key, win in pairs(panels) do
       if win == closed then
-        panel_wins[key] = nil
+        panels[key] = false
       end
     end
   end,
@@ -109,6 +119,8 @@ vim.api.nvim_create_autocmd('BufDelete', {
         vim.api.nvim_buf_delete(info, { force = true })
       end
     end
+    -- Clear last: nvim_buf_delete may fire WinClosed and re-set panels[ev.buf].
+    panels[ev.buf] = nil
   end,
 })
 

@@ -189,7 +189,12 @@ end
 function CoqLSPNvim:register(bufnr)
   assert(self.buffers[bufnr] == nil)
   self.buffers[bufnr] = {}
-  panel.open(self:panel_key(bufnr), bufnr)
+  local pk = self:panel_key(bufnr)
+  if self.config.info_panel_sticky_close then
+    panel.ensure_open(pk, bufnr)
+  else
+    panel.open(pk, bufnr)
+  end
 
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
     group = self.ag,
